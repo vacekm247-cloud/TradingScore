@@ -1,58 +1,85 @@
 import requests
-from bs4 import BeautifulSoup
 from datetime import datetime
 
 def get_kalendar_signal():
-    """
-    Zkontroluje ekonomický kalendář na ForexFactory.
-    Vrací: 1 = žádné riziko, 0 = menší zprávy, -1 = vysoké riziko
-    """
+    dnes = datetime.now().strftime("%Y-%m-%d")
+    print(f"Stahuji kalendář pro: {dnes}")
     try:
-        dnes = datetime.now().strftime("%b%d.%Y").lower()
-        url = f"https://www.forexfactory.com/calendar?day={dnes}"
-
+        url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Accept": "application/json"
         }
-
-        print(f"Stahuji kalendář pro: {dnes}")
         response = requests.get(url, headers=headers, timeout=10)
+        print(f"Status: {response.status_code}")
+        if response.status_code != 200:
+            print("Forex Factory nedostupná, používám zálohu.")
+            return get_manual_signal(dnes)
+        data = response.json()
 
-        soup = BeautifulSoup(response.text, "html.parser")
+        vysoke  = 0
+        stredni = 0
+        for zprava in data:
+            datum_raw = zprava.get("date", "")
+            datum = datum_raw[:10]
+            if datum != dnes:
+                continue
+            mena = zprava.get("currency", "")
+            if mena != "USD":
+                continue
+            impact = zprava.get("impact", "")
+            nazev  = zprava.get("title", "")
+            print(f"  → [{impact}] {nazev}")
+            if impact == "High":
+                vysoke += 1
+            elif impact == "Medium":
+                stredni += 1
 
-        # Hledáme události s vysokým dopadem (červené)
-        high_impact = soup.find_all("td", class_="calendar__impact")
+        print(f"\nVysoký dopad (USD): {vysoke}")
+        print(f"Střední dopad (USD): {stredni}")
 
-        vysoke_riziko = 0
-        stredni_riziko = 0
+        # Pokud FF nenašel nic, zkontroluj ještě zálohu
+        if vysoke == 0 and stredni == 0:
+            manual = get_manual_signal(dnes)
+            if manual != 1:
+                print("Záloha detekovala riziko → přebíjí FF výsledek!")
+                return manual
 
-        for impact in high_impact:
-            ikona = impact.find("span")
-            if ikona:
-                trida = ikona.get("class", [])
-                trida_str = " ".join(trida)
-                if "high" in trida_str:
-                    vysoke_riziko += 1
-                elif "medium" in trida_str:
-                    stredni_riziko += 1
-
-        print(f"Vysoký dopad: {vysoke_riziko} zpráv")
-        print(f"Střední dopad: {stredni_riziko} zpráv")
-
-        if vysoke_riziko > 0:
-            print("Signal: VYSOKÉ RIZIKO")
+        if vysoke > 0:
+            print("Signál: VYSOKÉ RIZIKO")
             return -1
-        elif stredni_riziko > 0:
-            print("Signal: MENŠÍ ZPRÁVY")
+        elif stredni > 0:
+            print("Signál: MENŠÍ ZPRÁVY")
             return 0
         else:
-            print("Signal: ŽÁDNÉ RIZIKO")
+            print("Signál: ŽÁDNÉ RIZIKO")
             return 1
-
     except Exception as e:
-        print(f"Chyba při načítání kalendáře: {e}")
-        return 0
+        print(f"Chyba při stahování kalendáře: {e}")
+        return get_manual_signal(dnes)
 
+VYSOKE_RIZIKO = {
+    "2026-04-29": "FED zasedání",
+    "2026-05-02": "NFP",
+    "2026-05-08": "ECB zasedání",
+    "2026-06-06": "NFP",
+}
+
+STREDNI_RIZIKO = {
+    "2026-04-30": "GDP data USA",
+    "2026-05-05": "ISM Services",
+}
+
+def get_manual_signal(dnes: str) -> int:
+    if dnes in VYSOKE_RIZIKO:
+        print(f"VYSOKÉ RIZIKO (záloha): {VYSOKE_RIZIKO[dnes]}")
+        return -1
+    elif dnes in STREDNI_RIZIKO:
+        print(f"STŘEDNÍ RIZIKO (záloha): {STREDNI_RIZIKO[dnes]}")
+        return 0
+    else:
+        print("Žádné rizikové zprávy (záloha)")
+        return 1
 
 if __name__ == "__main__":
     signal = get_kalendar_signal()
